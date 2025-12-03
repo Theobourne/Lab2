@@ -43,9 +43,6 @@ CLIENT_NODES = [
     ('K2', 'client.py'),
 ]
 
-processes: List[subprocess.Popen] = []
-
-
 def start_node(node_name: str, script: str) -> subprocess.Popen:
     """Start a single node"""
     logger.info(f"Starting {node_name}...")
@@ -59,68 +56,65 @@ def start_node(node_name: str, script: str) -> subprocess.Popen:
     return proc
 
 
-def start_all_nodes():
-    """Start all system nodes"""
-    global processes
-    
-    logger.info("="*60)
-    logger.info("STARTING DISTRIBUTED SYSTEM")
-    logger.info("="*60)
-    
-    # Start all service and queue nodes
-    for node_name, script in NODES:
+def start_group(group) -> List[tuple]:
+    """Start a group of nodes and return list of (name, process)."""
+    procs: List[tuple] = []
+    for node_name, script in group:
         proc = start_node(node_name, script)
-        processes.append(proc)
+        procs.append((node_name, proc))
         time.sleep(0.5)  # Small delay between starts
-    
-    logger.info("\nAll system nodes started. Waiting for initialization...")
-    time.sleep(3)  # Wait for all nodes to initialize
-    
-    logger.info("\n" + "="*60)
-    logger.info("STARTING CLIENTS")
-    logger.info("="*60)
-    
-    # Start clients
-    for client_name, script in CLIENT_NODES:
-        proc = start_node(client_name, script)
-        processes.append(proc)
-        time.sleep(0.5)
-    
-    logger.info("\nAll clients started. System is now running.")
-    logger.info("\nPress Ctrl+C to stop the system.\n")
+    return procs
 
 
-def stop_all_nodes():
-    """Stop all running nodes"""
-    global processes
-    
-    logger.info("\n" + "="*60)
-    logger.info("SHUTTING DOWN DISTRIBUTED SYSTEM")
-    logger.info("="*60)
-    
-    for proc in processes:
+def stop_processes(processes: List[tuple]):
+    """Terminate a list of (name, process) pairs."""
+    for name, proc in processes:
         try:
             proc.terminate()
-        except:
-            pass
+        except Exception:
+            logger.debug("Process %s already stopped", name)
     
-    # Wait for processes to terminate
     time.sleep(2)
     
-    # Force kill if still running
-    for proc in processes:
+    for name, proc in processes:
         try:
             proc.kill()
-        except:
+        except Exception:
             pass
+
+
+def wait_for_clients(client_procs: List[tuple], service_procs: List[tuple]) -> None:
+    """Block until all clients exit; if a service dies early, bail out."""
+    logger.info("Waiting for clients to finish; the system will stop automatically...")
     
-    logger.info("All nodes stopped.")
+    remaining = dict(client_procs)
+    while remaining:
+        time.sleep(1)
+        
+        # If any critical service died, stop everything
+        for svc_name, svc_proc in service_procs:
+            if svc_proc.poll() is not None:
+                logger.error("Critical node %s exited early (code %s). Stopping system.",
+                             svc_name, svc_proc.returncode)
+                return
+        
+        # Track finished clients
+        finished = []
+        for name, proc in remaining.items():
+            ret = proc.poll()
+            if ret is not None:
+                finished.append(name)
+                logger.info("Client %s finished with exit code %s", name, ret)
+        
+        for name in finished:
+            remaining.pop(name, None)
+    
+    logger.info("All clients finished. Shutting down services.")
 
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C"""
-    stop_all_nodes()
-    sys.exit(0)
+    raise KeyboardInterrupt
 
 
 def main():
@@ -128,21 +122,35 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     
     try:
-        start_all_nodes()
+        logger.info("="*60)
+        logger.info("STARTING DISTRIBUTED SYSTEM")
+        logger.info("="*60)
         
-        # Keep main thread alive and monitor processes
-        while True:
-            time.sleep(1)
-            
-            # Check if any critical process died
-            for i, proc in enumerate(processes[:len(NODES)]):  # Only check service nodes
-                if proc.poll() is not None:
-                    logger.error(f"A critical node has died! Exit code: {proc.returncode}")
-                    
+        # Start services
+        service_procs = start_group(NODES)
+        logger.info("\nAll system nodes started. Waiting for initialization...")
+        time.sleep(3)
+        
+        # Start clients
+        logger.info("\n" + "="*60)
+        logger.info("STARTING CLIENTS")
+        logger.info("="*60)
+        client_procs = start_group(CLIENT_NODES)
+        logger.info("\nAll clients started. System is now running.")
+        
+        # Wait for clients to finish; then shut everything down
+        wait_for_clients(client_procs, service_procs)
+        
     except KeyboardInterrupt:
-        pass
+        logger.info("Shutdown requested by user.")
     finally:
-        stop_all_nodes()
+        logger.info("\n" + "="*60)
+        logger.info("SHUTTING DOWN DISTRIBUTED SYSTEM")
+        logger.info("="*60)
+        # Stop clients first (if any still running), then services
+        stop_processes(client_procs if 'client_procs' in locals() else [])
+        stop_processes(service_procs if 'service_procs' in locals() else [])
+        logger.info("All nodes stopped.")
 
 
 if __name__ == '__main__':

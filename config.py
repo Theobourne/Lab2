@@ -60,13 +60,13 @@ QUEUE_CONFIG = {
 # Client configuration
 CLIENT_CONFIG = {
     'request_interval': 0.5,  # seconds between requests
-    'response_timeout': 10.0,  # seconds to wait for all responses
+    'response_timeout': 12.0,  # seconds to wait for all responses (more realistic tolerance)
     'num_requests': 100,  # number of requests to send per client
 }
 
 # P2x failure simulation
 P2X_FAILURE_CONFIG = {
-    'failure_probability': 0.01,  # 1% chance of being down
+    'failure_probability': 0.05,  # 5% chance of being down (more realistic)
     'failure_duration': (3, 8),  # seconds (min, max)
     'check_interval': 2.0,  # seconds between failure checks
 }
