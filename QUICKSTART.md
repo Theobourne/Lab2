@@ -32,7 +32,7 @@ This will:
 1. Start all service nodes (Q1, D, P11-P13, Q21-Q23, P21-P23)
 2. Wait for initialization
 3. Start client nodes (K1, K2)
-4. Run until completion or Ctrl+C
+4. Wait for both clients to finish, then shut everything down automatically (Ctrl+C still works to stop early)
 
 ### Option 2: Manual Start (For Testing/Debugging)
 
